@@ -14,6 +14,8 @@ import logging
 from torch.utils.data import DataLoader
 import random
 import sys
+import pytorch_lightning as pl
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 
 random.seed(42)
 
@@ -31,7 +33,8 @@ torch.autograd.profiler.emit_nvtx(False)
 
 
 # Models to choose from [resnet, alexnet, vgg, squeezenet, densenet, inception,googlenet]
-model_name = sys.argv[1]
+# model_name = sys.argv[1]
+model_name = 'inception'
 print(model_name)
 
 # Number of classes in the dataset
@@ -43,11 +46,13 @@ k_folds = 10
 # Batch size for training (change depending on how much memory you have)
 # batch_size = 10
 # batch_size = int(os.environ['batch_size'])
-batch_size = int(sys.argv[2])
+# batch_size = int(sys.argv[2])
+batch_size = 2
 print(batch_size)
 
 # Number of epochs to train for
-num_epochs = int(sys.argv[3])
+# num_epochs = int(sys.argv[3])
+num_epochs = 10
 
 # Flag for feature extracting. When False, we fine tune the whole model,
 #   when True we only update the reshaped layer params

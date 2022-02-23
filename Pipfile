@@ -5,6 +5,7 @@ name = "pypi"
 
 [packages]
 albumentations = "==1.1.0"
+pytorch-lightning = "==1.5.10"
 cycler = "==0.11.0"
 imageio = "==2.11.1"
 joblib = "==1.1.0"
