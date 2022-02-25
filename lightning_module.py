@@ -52,6 +52,7 @@ class Classifier(pl.LightningModule):
         super().__init__()
         model_ft = None
         input_size = 0
+        self.prepare_data_per_node = True
 
         if model_name == "googlenet":
             """ GoogLeNet
@@ -142,14 +143,14 @@ class Classifier(pl.LightningModule):
             acc = accuracy(outputs, labels)
         # self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         metrics = {"train_acc": acc, "train_loss": loss}
-        self.log_dict(metrics)
+        self.log_dict(metrics, on_epoch=True, on_step=False)
         # self.log('train_loss', loss)
         return loss
 
     def validation_step(self, val_batch, batch_idx):
         loss, acc = self._shared_eval_step(val_batch, batch_idx)
         metrics = {"val_acc": acc, "val_loss": loss}
-        self.log_dict(metrics)
+        self.log_dict(metrics, on_epoch=True, on_step=False)
         return metrics
 
         # self.log("val_loss_accuracy", metrics, on_step=True, on_epoch=True, prog_bar=True, logger=True)
@@ -177,6 +178,7 @@ class RetinalDataModule(pl.LightningDataModule):
         self.data_loaders_dict = None
         self.input_size = input_size
         self.image_datasets = None
+        self.prepare_data_per_node = True
 
     def setup(self, stage):
         data_transforms = {
@@ -204,9 +206,12 @@ class RetinalDataModule(pl.LightningDataModule):
         return DataLoader(self.image_datasets[val], batch_size=batch_size, num_workers=num_workers,
                           pin_memory=True)
 
+    def on_train_start(self):
+        self.logger.log_hyperparams(self.hparams, {"hp/metric_1": 0, "hp/metric_2": 0})
+
 
 if __name__ == '__main__':
-    tb_logger = pl_loggers.TensorBoardLogger("logs/")
+    #    tb_logger = pl_loggers.TensorBoardLogger("logs/")
     comet_logger = pl_loggers.CometLogger(api_key="wMHJnrgcTvUUwL5cmth3oJrpX",
                                           save_dir="logs/",
                                           project_name="default_project",
@@ -222,5 +227,5 @@ if __name__ == '__main__':
     data_module = RetinalDataModule(model.input_size)
     trainer = pl.Trainer(precision=16, gpus=-1, callbacks=[EarlyStopping(monitor="val_loss")], max_epochs=100,
                          min_epochs=3,
-                         default_root_dir="./trained_model", logger=[tb_logger, comet_logger])
+                         default_root_dir="./trained_model", logger=comet_logger)
     trainer.fit(model, data_module)
