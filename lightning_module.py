@@ -34,8 +34,9 @@ model_name = sys.argv[1]
 # model_name = "googlenet"
 batch_size = int(sys.argv[2])
 num_workers = int(sys.argv[3])
-# batch_size = 4
-use_pretrained = True
+# batch_size = 2
+# num_workers = 2
+use_pretrained = False
 train = 'train'
 val = 'val'
 criterion = CrossEntropyLoss()
@@ -124,7 +125,7 @@ class Classifier(pl.LightningModule):
 
         else:
             print("Invalid model name, exiting...")
-            logging.info("Invalid model name, exiting...")
+            # logging.info("Invalid model name, exiting...")
             exit()
         self.model_ft = model_ft
         self.input_size = input_size
@@ -137,6 +138,10 @@ class Classifier(pl.LightningModule):
             loss2 = self.cross_entropy_loss(aux_outputs, labels)
             loss = loss1 + 0.4 * loss2
             acc = accuracy(outputs, labels)
+        elif model_name == "googlenet" and use_pretrained is False:
+            outputs = self.model_ft(inputs)
+            loss = self.cross_entropy_loss(outputs[0], labels)
+            acc = accuracy(outputs[0], labels)
         else:
             outputs = self.model_ft(inputs)
             loss = self.cross_entropy_loss(outputs, labels)
@@ -179,6 +184,7 @@ class RetinalDataModule(pl.LightningDataModule):
         self.input_size = input_size
         self.image_datasets = None
         self.prepare_data_per_node = True
+        self.save_hyperparameters(logger=False)
 
     def setup(self, stage):
         data_transforms = {
@@ -215,7 +221,8 @@ if __name__ == '__main__':
     comet_logger = pl_loggers.CometLogger(api_key="wMHJnrgcTvUUwL5cmth3oJrpX",
                                           save_dir="logs/",
                                           project_name="default_project",
-                                          experiment_name=model_name, )
+                                          experiment_name=f"{model_name}+use_pretrained" if use_pretrained
+                                          else f"{model_name}+un-pretrained", )
     # checkpoint_callback = ModelCheckpoint(
     #     filepath='weights.pt',
     #     verbose=True,
@@ -225,7 +232,8 @@ if __name__ == '__main__':
     torch.cuda.empty_cache()
     model = Classifier()
     data_module = RetinalDataModule(model.input_size)
-    trainer = pl.Trainer(precision=16, gpus=-1, callbacks=[EarlyStopping(monitor="val_loss")], max_epochs=100,
+    trainer = pl.Trainer(logger=comet_logger, precision=16, gpus=-1, callbacks=[EarlyStopping(monitor="val_loss")],
+                         max_epochs=100,
                          min_epochs=3,
-                         default_root_dir="./trained_model", logger=comet_logger)
+                         default_root_dir="./trained_model")
     trainer.fit(model, data_module)
