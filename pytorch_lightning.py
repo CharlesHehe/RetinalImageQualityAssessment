@@ -23,18 +23,11 @@ from torchmetrics.functional import accuracy
 from pytorch_lightning.callbacks import ModelCheckpoint
 import gc
 
-models_name = ['densenet']
+models_name = ['densenet','resnet','vgg','squeezenet','alexnet','inception','googlenet']
 feature_extract = False
 num_classes = 2
 data_dir = "./data"
 # data_dir = "/scratch/data/retinal_data"
-# model_name = "densenet"
-# model_name = "resnet"
-# model_name = "vgg"
-# model_name = "squeezenet"
-# model_name = "alexnet"
-# model_name = "inception" batch_size = 7
-# model_name = "googlenet"
 batch_size = int(sys.argv[1])
 num_workers = int(sys.argv[2])
 patience = int(sys.argv[3])
@@ -46,7 +39,6 @@ train = 'train'
 val = 'val'
 test = 'test'
 criterion = CrossEntropyLoss()
-api_key = 'wMHJnrgcTvUUwL5cmth3oJrpX'
 desired_output = []
 actual_output = []
 
