@@ -20,11 +20,14 @@ from pytorch_lightning import loggers as pl_loggers
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from torchmetrics.functional import accuracy
+from pytorch_lightning.callbacks import ModelCheckpoint
+import gc
 
+models_name = ['densenet']
 feature_extract = False
 num_classes = 2
 data_dir = "./data"
-model_name = sys.argv[1]
+# data_dir = "/scratch/data/retinal_data"
 # model_name = "densenet"
 # model_name = "resnet"
 # model_name = "vgg"
@@ -32,14 +35,20 @@ model_name = sys.argv[1]
 # model_name = "alexnet"
 # model_name = "inception" batch_size = 7
 # model_name = "googlenet"
-batch_size = int(sys.argv[2])
-num_workers = int(sys.argv[3])
+batch_size = int(sys.argv[1])
+num_workers = int(sys.argv[2])
+patience = int(sys.argv[3])
+project_name = sys.argv[4]
 # batch_size = 2
 # num_workers = 2
-use_pretrained = False
+# use_pretrained = False
 train = 'train'
 val = 'val'
+test = 'test'
 criterion = CrossEntropyLoss()
+api_key = 'wMHJnrgcTvUUwL5cmth3oJrpX'
+desired_output = []
+actual_output = []
 
 
 def set_parameter_requires_grad(model, feature_extracting):
@@ -49,16 +58,17 @@ def set_parameter_requires_grad(model, feature_extracting):
 
 
 class Classifier(pl.LightningModule):
-    def __init__(self):
+    def __init__(self, use_pretrained):
         super().__init__()
         model_ft = None
         input_size = 0
         self.prepare_data_per_node = True
+        self.use_pretrained = use_pretrained
 
         if model_name == "googlenet":
             """ GoogLeNet
             """
-            model_ft = models.googlenet(pretrained=use_pretrained)
+            model_ft = models.googlenet(pretrained=self.use_pretrained)
             set_parameter_requires_grad(model_ft, feature_extract)
             num_ftrs = model_ft.fc.in_features
             model_ft.fc = nn.Linear(num_ftrs, num_classes)
@@ -67,7 +77,7 @@ class Classifier(pl.LightningModule):
         elif model_name == "resnet":
             """ Resnet18
             """
-            model_ft = models.resnet18(pretrained=use_pretrained)
+            model_ft = models.resnet18(pretrained=self.use_pretrained)
             set_parameter_requires_grad(model_ft, feature_extract)
             num_ftrs = model_ft.fc.in_features
             model_ft.fc = nn.Linear(num_ftrs, num_classes)
@@ -76,7 +86,7 @@ class Classifier(pl.LightningModule):
         elif model_name == "alexnet":
             """ Alexnet
             """
-            model_ft = models.alexnet(pretrained=use_pretrained)
+            model_ft = models.alexnet(pretrained=self.use_pretrained)
             set_parameter_requires_grad(model_ft, feature_extract)
             num_ftrs = model_ft.classifier[6].in_features
             model_ft.classifier[6] = nn.Linear(num_ftrs, num_classes)
@@ -85,7 +95,7 @@ class Classifier(pl.LightningModule):
         elif model_name == "vgg":
             """ VGG11_bn
             """
-            model_ft = models.vgg16(pretrained=use_pretrained)
+            model_ft = models.vgg16(pretrained=self.use_pretrained)
             set_parameter_requires_grad(model_ft, feature_extract)
             num_ftrs = model_ft.classifier[6].in_features
             model_ft.classifier[6] = nn.Linear(num_ftrs, num_classes)
@@ -94,7 +104,7 @@ class Classifier(pl.LightningModule):
         elif model_name == "squeezenet":
             """ Squeezenet
             """
-            model_ft = models.squeezenet1_0(pretrained=use_pretrained)
+            model_ft = models.squeezenet1_0(pretrained=self.use_pretrained)
             set_parameter_requires_grad(model_ft, feature_extract)
             model_ft.classifier[1] = nn.Conv2d(512, num_classes, kernel_size=(1, 1), stride=(1, 1))
             model_ft.num_classes = num_classes
@@ -103,7 +113,7 @@ class Classifier(pl.LightningModule):
         elif model_name == "densenet":
             """ Densenet
             """
-            model_ft = models.densenet121(pretrained=use_pretrained)
+            model_ft = models.densenet121(pretrained=self.use_pretrained)
             set_parameter_requires_grad(model_ft, feature_extract)
             num_ftrs = model_ft.classifier.in_features
             model_ft.classifier = nn.Linear(num_ftrs, num_classes)
@@ -113,7 +123,7 @@ class Classifier(pl.LightningModule):
             """ Inception v3
             Be careful, expects (299,299) sized images and has auxiliary output
             """
-            model_ft = models.inception_v3(pretrained=use_pretrained)
+            model_ft = models.inception_v3(pretrained=self.use_pretrained)
             set_parameter_requires_grad(model_ft, feature_extract)
             # Handle the auxilary net
             num_ftrs = model_ft.AuxLogits.fc.in_features
@@ -138,7 +148,7 @@ class Classifier(pl.LightningModule):
             loss2 = self.cross_entropy_loss(aux_outputs, labels)
             loss = loss1 + 0.4 * loss2
             acc = accuracy(outputs, labels)
-        elif model_name == "googlenet" and use_pretrained is False:
+        elif model_name == "googlenet" and self.use_pretrained is False:
             outputs = self.model_ft(inputs)
             loss = self.cross_entropy_loss(outputs[0], labels)
             acc = accuracy(outputs[0], labels)
@@ -146,10 +156,8 @@ class Classifier(pl.LightningModule):
             outputs = self.model_ft(inputs)
             loss = self.cross_entropy_loss(outputs, labels)
             acc = accuracy(outputs, labels)
-        # self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         metrics = {"train_acc": acc, "train_loss": loss}
         self.log_dict(metrics, on_epoch=True, on_step=False)
-        # self.log('train_loss', loss)
         return loss
 
     def validation_step(self, val_batch, batch_idx):
@@ -158,7 +166,17 @@ class Classifier(pl.LightningModule):
         self.log_dict(metrics, on_epoch=True, on_step=False)
         return metrics
 
-        # self.log("val_loss_accuracy", metrics, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+    def test_step(self, test_batch, batch_idx):
+        inputs, labels = test_batch
+        outputs = self.model_ft(inputs)
+        loss = self.cross_entropy_loss(outputs, labels)
+        acc = accuracy(outputs, labels)
+        desired_output.append(labels)
+        actual_output.append(outputs)
+        # loss, acc = self._shared_eval_step(test_batch, batch_idx)
+        metrics = {"test_acc": acc, "test_loss": loss}
+        self.log_dict(metrics, on_epoch=True, on_step=False)
+        return metrics
 
     def _shared_eval_step(self, batch, batch_idx):
         inputs, labels = batch
@@ -184,7 +202,7 @@ class RetinalDataModule(pl.LightningDataModule):
         self.input_size = input_size
         self.image_datasets = None
         self.prepare_data_per_node = True
-        self.save_hyperparameters(logger=False)
+        # self.save_hyperparameters(logger=False)
 
     def setup(self, stage):
         data_transforms = {
@@ -200,9 +218,15 @@ class RetinalDataModule(pl.LightningDataModule):
                 transforms.ToTensor(),
                 transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
             ]),
+            'test': transforms.Compose([
+                transforms.Resize(self.input_size),
+                transforms.CenterCrop(self.input_size),
+                transforms.ToTensor(),
+                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+            ]),
         }
         self.image_datasets = {x: datasets.ImageFolder(os.path.join(data_dir, x), data_transforms[x]) for x in
-                               [train, val]}
+                               [train, val, test]}
 
     def train_dataloader(self):
         return DataLoader(self.image_datasets[train], batch_size=batch_size, shuffle=True, num_workers=num_workers,
@@ -212,28 +236,87 @@ class RetinalDataModule(pl.LightningDataModule):
         return DataLoader(self.image_datasets[val], batch_size=batch_size, num_workers=num_workers,
                           pin_memory=True)
 
+    def test_dataloader(self):
+        return DataLoader(self.image_datasets[test], batch_size=batch_size, num_workers=num_workers,
+                          pin_memory=True)
+
     def on_train_start(self):
         self.logger.log_hyperparams(self.hparams, {"hp/metric_1": 0, "hp/metric_2": 0})
 
 
+def one_hot(lable_lable, pre_pre):
+    one_hot_l = []
+    one_hot_p = []
+    for label in lable_lable:
+        for q in label:
+            v = [0] * 2
+            v[q] = 1
+            one_hot_l.append(v)
+    for pred in pre_pre:
+        for q in pred:
+            if q[0] > q[1]:
+                p = 0
+            else:
+                p = 1
+            v = [0] * 2
+            v[p] = 1
+            one_hot_p.append(v)
+    return one_hot_l, one_hot_p
+
+
 if __name__ == '__main__':
-    #    tb_logger = pl_loggers.TensorBoardLogger("logs/")
-    comet_logger = pl_loggers.CometLogger(api_key="wMHJnrgcTvUUwL5cmth3oJrpX",
-                                          save_dir="logs/",
-                                          project_name="default_project",
-                                          experiment_name=f"{model_name}+use_pretrained" if use_pretrained
-                                          else f"{model_name}+un-pretrained", )
-    # checkpoint_callback = ModelCheckpoint(
-    #     filepath='weights.pt',
-    #     verbose=True,
-    #     monitor='val_loss',
-    #     mode='min'
-    # )
-    torch.cuda.empty_cache()
-    model = Classifier()
-    data_module = RetinalDataModule(model.input_size)
-    trainer = pl.Trainer(logger=comet_logger, precision=16, gpus=-1, callbacks=[EarlyStopping(monitor="val_loss")],
-                         max_epochs=100,
-                         min_epochs=3,
-                         default_root_dir="./trained_model")
-    trainer.fit(model, data_module)
+    for model_name in models_name:
+        use_pretrained = True
+        desired_output = []
+        actual_output = []
+        comet_logger1 = pl_loggers.CometLogger(api_key=api_key,
+                                               save_dir="logs/",
+                                               project_name=project_name,
+                                               experiment_name=f"{model_name}_use_pretrained" if use_pretrained
+                                               else f"{model_name}_un-pretrained", )
+        model1 = Classifier(use_pretrained)
+        data_module = RetinalDataModule(model1.input_size)
+        trainer1 = pl.Trainer(logger=comet_logger1,
+                              precision=16,
+                              gpus=-1,
+                              callbacks=[EarlyStopping(monitor="val_loss", patience=patience)],
+                              max_epochs=100,
+                              min_epochs=3,
+                              default_root_dir="./trained_model",
+                              check_val_every_n_epoch=1,
+                              strategy='dp',
+                              )
+        trainer1.fit(model1, data_module)
+        trainer1.test(model1, data_module)
+        trainer1.save_checkpoint(f"trained_model/{model_name}_use_pretrained.ckpt")
+        comet_logger1.experiment.log_model(f"{model_name}_use_pretrained.ckpt",
+                                           f'trained_model/{model_name}_use_pretrained.ckpt')
+        one_hot_labels, one_hot_preds = one_hot(desired_output, actual_output)
+
+        comet_logger1.experiment.log_confusion_matrix(one_hot_labels, one_hot_preds)
+        use_pretrained = False
+        desired_output = []
+        actual_output = []
+        comet_logger2 = pl_loggers.CometLogger(api_key=api_key,
+                                               save_dir="logs/",
+                                               project_name=project_name,
+                                               experiment_name=f"{model_name}_use_pretrained" if use_pretrained
+                                               else f"{model_name}_no_use_pretrained", )
+        model2 = Classifier(use_pretrained)
+        data_module = RetinalDataModule(model2.input_size)
+        trainer2 = pl.Trainer(logger=comet_logger2,
+                              precision=16,
+                              gpus=-1,
+                              callbacks=[EarlyStopping(monitor="val_loss", patience=patience)],
+                              max_epochs=100,
+                              min_epochs=3,
+                              default_root_dir="./trained_model",
+                              check_val_every_n_epoch=1,
+                              )
+        trainer2.fit(model2, data_module)
+        trainer2.test(model2, data_module)
+        trainer2.save_checkpoint(f"trained_model/{model_name}_no_use_pretrained.ckpt")
+        comet_logger2.experiment.log_model(f"{model_name}_no_use_pretrained.ckpt",
+                                           f'trained_model/{model_name}_no_use_pretrained.ckpt')
+        one_hot_labels, one_hot_preds = one_hot(desired_output, actual_output)
+        comet_logger2.experiment.log_confusion_matrix(one_hot_labels, one_hot_preds)
